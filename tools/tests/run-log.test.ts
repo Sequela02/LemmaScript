@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { dafnyCheckDiff, dafnyRegen, dafnyVerify } from "../src/dafny-commands.ts";
 import {
-  RunLog, ensureLogDir, hashText, isPartialRun, parseTextLog, readRecords, resolveLogDir, runLogEnabled, snapshotSource,
+  RunLog, ensureLogDir, hashText, isPartialRun, parseTextLog, readRecords, resolveLogDir, runLogEnabled, safely, snapshotSource,
 } from "../src/run-log.ts";
 
 const posixOnly = { skip: process.platform === "win32" };
@@ -94,7 +94,7 @@ function verifyWithLog(root: string, opts: { extraFlags?: string; proof?: string
   const dfy = join(root, "a.dfy");
   writeFileSync(source, "export const a = 1;\n");
   writeFileSync(dfy, opts.proof ?? "lemma L() {}\n");
-  const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, extraFlags: opts.extraFlags, lscVersion: () => "0" });
+  const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, extraFlags: opts.extraFlags, lscVersion: "0" });
   return dafnyVerify(dfy, root, undefined, opts.extraFlags, log);
 }
 
@@ -105,7 +105,7 @@ function checkDiffWithLog(root: string, generated: string, proof: string): boole
   writeFileSync(source, "");
   writeFileSync(gen, generated);
   writeFileSync(dfy, proof);
-  const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: () => "0" });
+  const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: "0" });
   return dafnyCheckDiff(gen, dfy, log);
 }
 
@@ -123,7 +123,7 @@ function regenRecord(root: string, proof: string, next: string, opts: { base?: s
   writeFileSync(f.gen, generation(0));
   writeFileSync(f.proof, proof);
   if (opts.base) writeFileSync(f.base, opts.base);
-  const log = new RunLog({ logDir: root, cmd: "regen", sourcePath: f.source, lscVersion: () => "0" });
+  const log = new RunLog({ logDir: root, cmd: "regen", sourcePath: f.source, lscVersion: "0" });
   const originalExit = process.exit;
   process.exit = ((code?: number) => { throw new ExitSignal(code); }) as typeof process.exit;
   try {
@@ -267,7 +267,7 @@ test("finish appends one complete record and ignores later calls", () => {
     writeFileSync(source, "export const a = 1;\n");
     const dfy = join(root, "src", "a.dfy");
     writeFileSync(dfy, "lemma L() {}\n");
-    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: () => "9.9.9" });
+    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: "9.9.9" });
     log.finish({ stage: "verify", exit: 1, dfyPath: dfy, results: { passed: ["a"], failed: ["L"] } });
     log.finish({ stage: "ok", exit: 0, dfyPath: dfy });
     const [r, ...rest] = records(root);
@@ -299,9 +299,9 @@ test("a run without member results, or with a filter, is partial", () => {
   try {
     const source = join(root, "a.ts");
     writeFileSync(source, "");
-    new RunLog({ logDir: root, cmd: "regen", sourcePath: source, lscVersion: () => "0" })
+    new RunLog({ logDir: root, cmd: "regen", sourcePath: source, lscVersion: "0" })
       .finish({ stage: "diff", exit: 1, dfyPath: join(root, "missing.dfy") });
-    new RunLog({ logDir: root, cmd: "check", sourcePath: source, extraFlags: "--filter-symbol=a", lscVersion: () => "0" })
+    new RunLog({ logDir: root, cmd: "check", sourcePath: source, extraFlags: "--filter-symbol=a", lscVersion: "0" })
       .finish({ stage: "ok", exit: 0, dfyPath: join(root, "missing.dfy"), results: { passed: ["a"], failed: [] } });
     const [diff, filtered] = records(root);
     assert.equal(diff.partial, true);
@@ -320,7 +320,7 @@ test("an unwritable log directory never throws", () => {
     writeFileSync(blocker, "a file, so nothing can be created beneath it");
     const source = join(root, "a.ts");
     writeFileSync(source, "");
-    const log = new RunLog({ logDir: join(blocker, "sub"), cmd: "check", sourcePath: source, lscVersion: () => "0" });
+    const log = new RunLog({ logDir: join(blocker, "sub"), cmd: "check", sourcePath: source, lscVersion: "0" });
     assert.doesNotThrow(() => log.dafnyArgs());
     assert.doesNotThrow(() => log.finish({ stage: "ok", exit: 0, dfyPath: source }));
   } finally {
@@ -328,14 +328,13 @@ test("an unwritable log directory never throws", () => {
   }
 });
 
-test("a version that can't be read is recorded as null and never throws", () => {
+test("a version that can't be read is recorded as null", () => {
   const root = tempDir();
   try {
     const source = join(root, "a.ts");
     writeFileSync(source, "");
-    const unreadable = () => { throw new Error("ENOENT: no such file or directory, open 'package.json'"); };
-    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: unreadable });
-    assert.doesNotThrow(() => log.finish({ stage: "ok", exit: 0, dfyPath: source }));
+    const lscVersion = safely((): string => { throw new Error("ENOENT: no such file or directory, open 'package.json'"); });
+    new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion }).finish({ stage: "ok", exit: 0, dfyPath: source });
     assert.equal(records(root)[0].lsc, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -347,7 +346,7 @@ test("dafnyArgs points Dafny at a temporary text log that readResults parses", (
   try {
     const source = join(root, "a.ts");
     writeFileSync(source, "");
-    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: () => "0" });
+    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: "0" });
     assert.equal(log.readResults(), null);
     const args = log.dafnyArgs();
     assert.equal(args[0], "--log-format");
@@ -367,7 +366,7 @@ test("discard ends a run without a record and removes Dafny's temporary results 
   try {
     const source = join(root, "a.ts");
     writeFileSync(source, "");
-    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: () => "0" });
+    const log = new RunLog({ logDir: root, cmd: "check", sourcePath: source, lscVersion: "0" });
     const file = log.dafnyArgs()[1].replace(/^text;LogFileName=/, "");
     const folder = join(file, "..");
     assert.ok(existsSync(folder));
