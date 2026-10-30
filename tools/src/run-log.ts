@@ -42,7 +42,7 @@ export interface VerifyRecord {
   passed: string[];
   tsHash: string | null;
   dfyHash: string | null;
-  lsc: string;
+  lsc: string | null;
 }
 
 export interface RunLogInit {
@@ -50,7 +50,8 @@ export interface RunLogInit {
   cmd: "check" | "regen";
   sourcePath: string;
   extraFlags?: string;
-  lscVersion: string;
+  /** Read when the record is written, so a version that can't be read never fails the run. */
+  lscVersion: () => string;
 }
 
 /**
@@ -212,7 +213,7 @@ export class RunLog {
           passed: results?.passed ?? [],
           tsHash: this.tsHash,
           dfyHash: safely(() => hashText(readFileSync(outcome.dfyPath, "utf8"))),
-          lsc: this.init.lscVersion,
+          lsc: safely(this.init.lscVersion),
         };
         appendFileSync(path.join(dir, "runs.jsonl"), JSON.stringify(record) + "\n");
       });

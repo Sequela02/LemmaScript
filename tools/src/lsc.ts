@@ -436,7 +436,7 @@ function runFile(
     // so an aborted run leaves no snapshot; each helper records the stage it detects.
     const logCmd = cmd === "check" || cmd === "regen" ? cmd : null;
     const log = logCmd && runLogOn
-      ? new RunLog({ logDir: resolveLogDir(absPath, configFile), cmd: logCmd, sourcePath: absPath, extraFlags, lscVersion: lscVersion() })
+      ? new RunLog({ logDir: resolveLogDir(absPath, configFile), cmd: logCmd, sourcePath: absPath, extraFlags, lscVersion })
       : undefined;
 
     if (cmd === "gen") { dafnyGen(genPath, dfyPath, text); return; }
